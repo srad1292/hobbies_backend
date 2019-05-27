@@ -1,0 +1,27 @@
+{
+  "name": "hobby-backend",
+  "version": "1.0.0",
+  "description": "Bringing together APIs for my hobbies to centralize ratings",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/srad1292/hobbies_backend.git"
+  },
+  "author": "Sam Radford",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/srad1292/hobbies_backend/issues"
+  },
+  "homepage": "https://github.com/srad1292/hobbies_backend#readme",
+  "dependencies": {
+    "bcrypt": "^3.0.6",
+    "cors": "^2.8.5",
+    "express": "^4.17.0",
+    "mongodb": "^3.2.6",
+    "request": "^2.88.0"
+  }
+}
