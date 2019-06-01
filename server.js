@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const express = require('express');
 const MongoClient = require('mongodb').MongoClient;
+const {ObjectId} = require('mongodb');
 const request = require('request');
 
 const url = "mongodb://localhost:27017/";
@@ -37,7 +38,8 @@ app.listen(8000, () => {
  * 3. Routes for CRUD for manga table
  * 4. Routes for CRUD for books table
  * 5. Routes for CRUD for movies table(if i add this)
- * 6. Maybe move routes outside of server file to use a more MVC type system
+ * 6. Update return key to specify message or mongoMessage depending on error source
+ * 7. Maybe move routes outside of server file to use a more MVC type system
  */
 
 //Anime Routes
@@ -73,6 +75,122 @@ app.route('/anime/:id').get((req, res) => {
       }
     }
   )
+});
+
+/**
+ * Retrieve an anime rating document based on a given
+ * username and anime id
+ * 
+ * @param {id: string} - MAL anime ID
+ * @param {user: string} - Username for who we want the rating for
+ * 
+ * Success -
+ * @returns {rating: object} - The anime_rating document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/anime/rating/:id/for/:user').get((req, res) => {
+  const animeId = parseInt(req.params['id'], 10);
+  const userName = req.params['user'];
+  dbh.collection("anime_ratings").findOne({malId: animeId, userName:userName}, function(err, findRes) {
+    if (err) {
+      return res.status(500).send({
+        message: err
+      });
+    }
+    else {
+      //No rating found for that anime/user combo
+      if(!findRes) {
+        return res.send({message: 'No error, but no data found'});
+      }
+
+      return res.send({rating: findRes});
+    }
+  });
+});
+
+/**
+ * Creates a new document in the anime_rating table for a user
+ * 
+ * @param {rating: object} - A anime_rating object to insert
+ * 
+ * Success -
+ * @returns {rating: object} - A message and the id for the new document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/anime/rating/').post((req, res) => {
+  const newRating = req.body['rating'];
+
+  //Handle cases where user data isn't as expected just to be safe 
+
+  dbh.collection("anime_ratings").insertOne(newRating, function(err, insertRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(insertRes && insertRes.insertedId) {
+      return res.send({ message: 'ok', recordId: insertRes.insertedId });  
+    }
+    else{
+      return res.send({message: 'No error, but no data found'});
+    }
+  });
+
+});
+
+/**
+ * Updates a document in the anime_rating table for a user
+ * 
+ * @param {rating: object} - The updated anime_rating object
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/anime/rating/').put((req, res) => {
+  const requestBody = req.body['rating'];
+  const updateQuery = { $set: requestBody}; 
+
+  const ratingQuery = {_id: requestBody['_id']};
+  dbh.collection("anime_ratings").updateOne(ratingQuery, updateQuery, function(err, updateRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    return res.send({ message: 'ok' });
+  });
+});
+
+/**
+ * Removes an anime_rating document from the table
+ * 
+ * @param {id: string} - The _id for the document to be deleted
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/anime/rating/:id/').delete((req, res) => {
+  const id = ObjectId(req.params['id']);
+  const ratingQuery = {_id: id};
+  dbh.collection("anime_ratings").deleteOne(ratingQuery, function(err, deleteRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(deleteRes && deleteRes.deletedCount && deleteRes.deletedCount == 1) {
+      return res.send({ message: 'ok' });
+    }
+    else {
+      return res.send({ message: 'No errors, but nothing deleted' });
+    }
+  });
 });
 
 
