@@ -4,6 +4,8 @@ const express = require('express');
 const MongoClient = require('mongodb').MongoClient;
 const {ObjectId} = require('mongodb');
 const request = require('request');
+var xtjParseString = require('xml2js').parseString;
+const apiKeys = require('./api_keys');
 
 const url = "mongodb://localhost:27017/";
 const salt_rounds = 10;
@@ -35,7 +37,7 @@ app.listen(8000, () => {
  * To-do
  * 1. Routes for updating/deleting user
  * X. Routes for CRUD for anime table
- * 3. Routes for CRUD for manga table
+ * X. Routes for CRUD for manga table
  * 4. Routes for CRUD for books table
  * 5. Routes for CRUD for movies table(if i add this)
  * 6. Update return key to specify message or mongoMessage depending on error source
@@ -222,127 +224,8 @@ app.route('/anime/ratings/:user').get((req, res) => {
   });
 });
 
-/**
- * Retrieve an anime rating document based on a given
- * username and anime id
- * 
- * @param {id: string} - MAL anime ID
- * @param {user: string} - Username for who we want the rating for
- * 
- * Success -
- * @returns {rating: object} - The anime_rating document
- * Error -
- * @returns {error: Object} - HTTP Error object with reason for failure
- */
-app.route('/anime/rating/:id/for/:user').get((req, res) => {
-  const animeId = parseInt(req.params['id'], 10);
-  const userName = req.params['user'];
-  dbh.collection("anime_ratings").findOne({malId: animeId, userName:userName}, function(err, findRes) {
-    if (err) {
-      return res.status(500).send({
-        message: err
-      });
-    }
-    else {
-      //No rating found for that anime/user combo
-      if(!findRes) {
-        return res.send({message: 'No error, but no data found'});
-      }
 
-      return res.send({rating: findRes});
-    }
-  });
-});
 
-/**
- * Creates a new document in the anime_rating table for a user
- * 
- * @param {rating: object} - A anime_rating object to insert
- * 
- * Success -
- * @returns {rating: object} - A message and the id for the new document
- * Error -
- * @returns {error: Object} - HTTP Error object with reason for failure
- */
-app.route('/anime/rating/').post((req, res) => {
-  const newRating = req.body['rating'];
-
-  //Handle cases where user data isn't as expected just to be safe 
-
-  dbh.collection("anime_ratings").insertOne(newRating, function(err, insertRes) {
-    if (err){
-      return res.status(500).send({
-        message: err
-      });
-    }
-    if(insertRes && insertRes.insertedId) {
-      return res.send({ message: 'ok', recordId: insertRes.insertedId });  
-    }
-    else{
-      return res.send({message: 'No error, but no data found'});
-    }
-  });
-
-});
-
-/**
- * Updates a document in the anime_rating table for a user
- * 
- * @param {rating: object} - The updated anime_rating object
- * 
- * Success -
- * @returns {rating: object} - A success message
- * Error -
- * @returns {error: Object} - HTTP Error object with reason for failure
- */
-app.route('/anime/rating/').put((req, res) => {
-  const requestBody = req.body['rating'];
-  const ratingQuery = {_id: ObjectId(requestBody['_id'])};
-  delete requestBody['_id'];
-  const updateQuery = { $set: requestBody}; 
-
-  dbh.collection("anime_ratings").updateOne(ratingQuery, updateQuery, function(err, updateRes) {
-    if (err){
-      return res.status(500).send({
-        message: err
-      });
-    }
-    if( updateRes && updateRes['modifiedCount']) {
-      return res.send({ message: 'ok' });
-    }
-    return res.status(500).send({
-      message: 'Failed to update'
-    });
-  });
-});
-
-/**
- * Removes an anime_rating document from the table
- * 
- * @param {id: string} - The _id for the document to be deleted
- * 
- * Success -
- * @returns {rating: object} - A success message
- * Error -
- * @returns {error: Object} - HTTP Error object with reason for failure
- */
-app.route('/anime/rating/:id/').delete((req, res) => {
-  const id = ObjectId(req.params['id']);
-  const ratingQuery = {_id: id};
-  dbh.collection("anime_ratings").deleteOne(ratingQuery, function(err, deleteRes) {
-    if (err){
-      return res.status(500).send({
-        message: err
-      });
-    }
-    if(deleteRes && deleteRes.deletedCount && deleteRes.deletedCount == 1) {
-      return res.send({ message: 'ok' });
-    }
-    else {
-      return res.send({ message: 'No errors, but nothing deleted' });
-    }
-  });
-});
 
 
 
@@ -543,6 +426,256 @@ app.route('/manga/rating/:id/').delete((req, res) => {
 
 //**************************
 
+//Book Routes
+
+/**
+ * Hit api to retrieve details on an book for a given id
+ * 
+ * @param {id: string} - isbn for book
+ * 
+ * Success -
+ * @returns {book: object} - Book data for provided id on success
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/:id').get((req, res) => {
+  const isbn = req.params['id'];
+
+
+  //Handle input errors
+  const params = {format: 'xml', key: apiKeys.goodReadsKey, id: isbn};
+
+  request.get(
+    {
+      url: `https://www.goodreads.com/book/show`,
+      qs: params,
+      
+    },
+    function(error, response, body) {
+      if(error) {
+        return res.status(error.status).send({
+            message: error.error
+        });
+      }
+      else {
+        xtjParseString(body, function (err, result) {
+          if(err) {
+            return res.status(err.status).send({
+                message: err.error
+            });
+          }
+          const parsedResult = (result && 'GoodreadsResponse' in result && 'book' in result.GoodreadsResponse) ? parseGoodReadsDetails(result.GoodreadsResponse.book) : {};
+          return res.send({book: parsedResult});
+          
+        });
+          
+      }
+    }
+  )
+});
+
+function parseGoodReadsDetails(bookAsArray) {
+  const book = bookAsArray[0] || {};
+
+  let authorsList = parseAuthors(book);
+  let similarBooks = parseSimilarBooks(book);
+
+  return {
+    id: (book.id || []).join(""),
+    title: (book.title || []).join(""),
+    isbn: (book.isbn || []).join(""),
+    image_url: (book.image_url || []).join(""),
+    small_image_url: (book.small_image_url || []).join(""),
+    publication_year: (book.publication_year || []).join(""),
+    publication_month: (book.publication_month || []).join(""),
+    publication_day: (book.publication_day || []).join(""),
+    publisher: (book.publisher || []).join(", "),
+    description: (book.description || []).join("").replace(/(\.<([^>]+)>)/ig,".  ").replace(/(<([^>]+)>)/ig,""),
+    average_rating: (book.average_rating || []).join(""),
+    ratings_count: (book.ratings_count || []).join(""),
+    num_pages: (book.num_pages || []).join(""),
+    url: (book.url || []).join(""),
+    authors: authorsList,
+    similar_books: similarBooks,
+  }
+}
+
+function parseAuthors(book) {
+  return ('authors' in book && book.authors.length > 0 && 'author' in book.authors[0]) ? 
+    book.authors[0].author.map(author => {
+      return {
+        name: ('name' in author && author.name.length > 0) ? author.name[0] : '',
+        role: ('role' in author && author.role.length > 0) ? author.role[0] : '',
+      }
+    }) : [];
+}
+
+function parseSimilarBooks(book) {
+  let similarBooks = ('similar_books' in book && book.similar_books.length > 0 && 'book' in book.similar_books[0]) ? book.similar_books[0].book : [];
+
+  return similarBooks.map(simBook => {
+    return {
+      authors: parseAuthors(simBook),
+      average_rating: (simBook.average_rating || []).join(""),
+      isbn: (simBook.isbn || []).join(""),
+      id: (simBook.id || []).join(""),
+      num_pages: (simBook.num_pages || []).join(""),
+      title: (simBook.title || []).join(""),
+      publication_year: (simBook.publication_year || []).join(""),
+    }
+  });
+
+}
+
+/**
+ * Retrieve all book ratings for a given user
+ * 
+ * @param {user: string} - Username for who we want the rating for
+ * 
+ * Success -
+ * @returns {rating: object} - The book_rating document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/ratings/:user').get((req, res) => {
+  const userName = req.params['user'];
+  dbh.collection("book_ratings").find({userName:userName}).toArray(function(err, findRes) {
+    if (err) {
+      return res.status(500).send({
+        message: err
+      });
+    }
+    else {
+      //No rating found for that book/user combo
+      if(!findRes) {
+        return res.send({message: 'No error, but no data found'});
+      }
+      return res.send({ratings: findRes});
+    }
+  });
+});
+
+/**
+ * Retrieve an book rating document based on a given
+ * username and book id
+ * 
+ * @param {id: string} - MAL book ID
+ * @param {user: string} - Username for who we want the rating for
+ * 
+ * Success -
+ * @returns {rating: object} - The book_rating document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/rating/:id/for/:user').get((req, res) => {
+  const bookId = req.params['id'];
+  const userName = req.params['user'];
+  dbh.collection("book_ratings").findOne({goodreadsId: bookId, userName:userName}, function(err, findRes) {
+    if (err) {
+      return res.status(500).send({
+        message: err
+      });
+    }
+    else {
+      //No rating found for that book/user combo
+      if(!findRes) {
+        return res.send({message: 'No error, but no data found'});
+      }
+
+      return res.send({rating: findRes});
+    }
+  });
+});
+
+/**
+ * Creates a new document in the book_rating table for a user
+ * 
+ * @param {rating: object} - A book_rating object to insert
+ * 
+ * Success -
+ * @returns {rating: object} - A message and the id for the new document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/rating/').post((req, res) => {
+  const newRating = req.body['rating'];
+
+  //Handle cases where user data isn't as expected just to be safe 
+
+  dbh.collection("book_ratings").insertOne(newRating, function(err, insertRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(insertRes && insertRes.insertedId) {
+      return res.send({ message: 'ok', recordId: insertRes.insertedId });  
+    }
+    else{
+      return res.send({message: 'No error, but no data found'});
+    }
+  });
+
+});
+
+/**
+ * Updates a document in the book_rating table for a user
+ * 
+ * @param {rating: object} - The updated book_rating object
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/rating/').put((req, res) => {
+  const requestBody = req.body['rating'];
+  const ratingQuery = {_id: ObjectId(requestBody['_id'])};
+  delete requestBody['_id'];
+  const updateQuery = { $set: requestBody}; 
+
+  dbh.collection("book_ratings").updateOne(ratingQuery, updateQuery, function(err, updateRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if( updateRes && updateRes['modifiedCount']) {
+      return res.send({ message: 'ok' });
+    }
+    return res.status(500).send({
+      message: 'Failed to update'
+    });
+  });
+});
+
+/**
+ * Removes an book_rating document from the table
+ * 
+ * @param {id: string} - The _id for the document to be deleted
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/book/rating/:id/').delete((req, res) => {
+  const id = ObjectId(req.params['id']);
+  const ratingQuery = {_id: id};
+  dbh.collection("book_ratings").deleteOne(ratingQuery, function(err, deleteRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(deleteRes && deleteRes.deletedCount && deleteRes.deletedCount == 1) {
+      return res.send({ message: 'ok' });
+    }
+    else {
+      return res.send({ message: 'No errors, but nothing deleted' });
+    }
+  });
+});
 
 
 //User Routes
@@ -711,6 +844,73 @@ app.route('/search/anime/:title').get((req, res) => {
     }
   )
 });
+
+/**
+ * Hit api to retrieve details for book matching search value
+ * 
+ * @param {title: string} - text you want to search book titles for
+ * 
+ * Success -
+ * @returns {book: array<object>} - Book data for provided title on success
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/search/books/:title').get((req, res) => {
+  const title = req.params['title'];
+
+  //Handle input errors
+  const params = {'q': title, 'key': apiKeys.goodReadsKey, "search[field]": 'title'};
+  
+  request.get(
+    {
+      url: `https://www.goodreads.com/search/index.xml`,
+      qs: params,
+      json: true
+    },
+    function(error, response, body) {
+      if(error) {
+        return res.status(error.status).send({
+            message: error.error
+        });
+      }
+      else {
+        xtjParseString(body, function (err, result) {
+          if(err) {
+            return res.status(err.status).send({
+                message: err.error
+            });
+          }
+          const searchResults = ((((((result || {}).GoodreadsResponse || {}).search || [{}])[0] || {}).results || [{}])[0] || {}).work || [];
+          const cleanedUpResults = parseGoodReadsSearch(searchResults);
+          return res.send(cleanedUpResults);
+          
+        });
+      }
+    }
+  )
+});
+
+
+
+
+function parseGoodReadsSearch(results) {
+  //Good reads API is an abomination
+  return results.map(result => {
+      return {
+        author: ((((((result || {}).best_book || [{}])[0] || {}).author || [{}])[0] || {}).name || [''])[0] || '',
+        average_rating: ((result || {}).average_rating || [''])[0] || '',
+        book_id: (((((result || {}).best_book || [{}])[0] || {}).id || [{}])[0] || {})['_'] || '',
+        image_url: ((((result || {}).best_book || [{}])[0] || {}).image_url || [''])[0] || '',
+        pub_day: (((result || {}).original_publication_day || [{}])[0] || {})['_'] || '',
+        pub_month: (((result || {}).original_publication_month || [{}])[0] || {})['_'] || '',
+        pub_year: (((result || {}).original_publication_year || [{}])[0] || {})['_'] || '',
+        small_image_url: ((((result || {}).best_book || [{}])[0] || {}).small_image_url || [''])[0] || '',
+        title: ((((result || {}).best_book || [{}])[0] || {}).title || [''])[0] || '',
+        ratings: (((result || {}).ratings_count || [{}])[0] || {})['_'] || '',
+        result_id: (((result || {}).id || [{}])[0] || {})['_'] || '' 
+      }
+  });
+}
 
 
 /**
