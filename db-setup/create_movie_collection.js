@@ -6,9 +6,9 @@ MongoClient.connect(url, { useNewUrlParser: true }, function(err, db) {
     
     const dbo = db.db("hobbies-db");
     
-    dbo.createCollection("manga_ratings", function(err, res) {
+    dbo.createCollection("movie_ratings", function(err, res) {
         if (err) throw err;
-        console.log("Collection Created: manga_ratings");
+        console.log("Collection Created: movie_ratings");
         db.close();
     });
 });

@@ -678,6 +678,194 @@ app.route('/book/rating/:id/').delete((req, res) => {
 });
 
 
+//**************************
+
+//Movie Routes
+
+/**
+ * Hit api to retrieve details on an movie for a given id
+ * 
+ * @param {id: string} - isbn for movie
+ * 
+ * Success -
+ * @returns {movie: object} - Movie data for provided id on success
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/:id').get((req, res) => {
+  const id = req.params['id'];
+  const apiKey = apiKeys.theMovieDBKey;
+
+  //Handle input errors
+  request.get(
+    {
+      url: `https://api.themoviedb.org/3/movie/${id}?api_key=${apiKey}`,      
+    },
+    function(error, response, body) {
+        if(error) {
+            return res.status(error.status).send({
+                message: error.error
+            });
+        }
+        else {
+            return res.send({movie: (body  || '{}') });
+        }
+    }
+  )
+});
+
+
+/**
+ * Retrieve all movie ratings for a given user
+ * 
+ * @param {user: string} - Username for who we want the rating for
+ * 
+ * Success -
+ * @returns {rating: object} - The movie_rating document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/ratings/:user').get((req, res) => {
+  const userName = req.params['user'];
+  dbh.collection("movie_ratings").find({userName:userName}).toArray(function(err, findRes) {
+    if (err) {
+      return res.status(500).send({
+        message: err
+      });
+    }
+    else {
+      //No rating found for that movie/user combo
+      if(!findRes) {
+        return res.send({message: 'No error, but no data found'});
+      }
+      return res.send({ratings: findRes});
+    }
+  });
+});
+
+/**
+ * Retrieve an movie rating document based on a given
+ * username and movie id
+ * 
+ * @param {id: string} - MAL movie ID
+ * @param {user: string} - Username for who we want the rating for
+ * 
+ * Success -
+ * @returns {rating: object} - The movie_rating document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/rating/:id/for/:user').get((req, res) => {
+  const movieId = parseInt(req.params['id'], 10);
+  const userName = req.params['user'];
+  
+  dbh.collection("movie_ratings").findOne({id: movieId, userName:userName}, function(err, findRes) {
+    if (err) {
+      return res.status(500).send({
+        message: err
+      });
+    }
+    else {
+      //No rating found for that movie/user combo
+      if(!findRes) {
+        return res.send({message: 'No error, but no data found'});
+      }
+
+      return res.send({rating: findRes});
+    }
+  });
+});
+
+/**
+ * Creates a new document in the movie_rating table for a user
+ * 
+ * @param {rating: object} - A movie_rating object to insert
+ * 
+ * Success -
+ * @returns {rating: object} - A message and the id for the new document
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/rating/').post((req, res) => {
+  const newRating = req.body['rating'];
+
+  //Handle cases where user data isn't as expected just to be safe 
+
+  dbh.collection("movie_ratings").insertOne(newRating, function(err, insertRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(insertRes && insertRes.insertedId) {
+      return res.send({ message: 'ok', recordId: insertRes.insertedId });  
+    }
+    else{
+      return res.send({message: 'No error, but no data found'});
+    }
+  });
+
+});
+
+/**
+ * Updates a document in the movie_rating table for a user
+ * 
+ * @param {rating: object} - The updated movie_rating object
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/rating/').put((req, res) => {
+  const requestBody = req.body['rating'];
+  const ratingQuery = {_id: ObjectId(requestBody['_id'])};
+  delete requestBody['_id'];
+  const updateQuery = { $set: requestBody}; 
+
+  dbh.collection("movie_ratings").updateOne(ratingQuery, updateQuery, function(err, updateRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if( updateRes && updateRes['modifiedCount']) {
+      return res.send({ message: 'ok' });
+    }
+    return res.status(500).send({
+      message: 'Failed to update'
+    });
+  });
+});
+
+/**
+ * Removes an movie_rating document from the table
+ * 
+ * @param {id: string} - The _id for the document to be deleted
+ * 
+ * Success -
+ * @returns {rating: object} - A success message
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/movie/rating/:id/').delete((req, res) => {
+  const id = ObjectId(req.params['id']);
+  const ratingQuery = {_id: id};
+  dbh.collection("movie_ratings").deleteOne(ratingQuery, function(err, deleteRes) {
+    if (err){
+      return res.status(500).send({
+        message: err
+      });
+    }
+    if(deleteRes && deleteRes.deletedCount && deleteRes.deletedCount == 1) {
+      return res.send({ message: 'ok' });
+    }
+    else {
+      return res.send({ message: 'No errors, but nothing deleted' });
+    }
+  });
+});
+
 //User Routes
 
 /**
@@ -947,3 +1135,43 @@ app.route('/search/manga/:title').get((req, res) => {
   )
 });
 
+
+/**
+ * Hit api to retrieve details for movie matching search value
+ * 
+ * @param {title: string} - text you want to search movie titles for
+ * 
+ * Success -
+ * @returns {movie: array<object>} - Movie data for provided title on success
+ * Error -
+ * @returns {error: Object} - HTTP Error object with reason for failure
+ */
+app.route('/search/movie/:title').get((req, res) => {
+  const title = req.params['title'];
+  const apiKey = apiKeys.theMovieDBKey;
+  //Handle input errors
+  
+  request.get(
+    {
+      url: `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${title}&page=1&include_adult=false`,
+      json: true
+    },
+    function(error, response, body) {
+      if(error) {
+        return res.status(error.status).send({
+            message: error.error
+        });
+      }
+      else {
+        if('success' in body && body.success === false) {
+          return res.status(400).send({
+            message: body.status_message || 'Invalid Request'
+          });
+        }
+        else {
+          return res.send(body.results);
+        }
+      }
+    }
+  )
+});
